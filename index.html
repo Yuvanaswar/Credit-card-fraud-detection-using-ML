@@ -1,0 +1,193 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FraudGuard AI - Credit Card Fraud Detection</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;600&display=swap" rel="stylesheet">
+    <script src="https://cdn.jsdelivr.net/npm/chart.js"></script>
+</head>
+
+<body>
+
+    <div class="main-wrapper">
+        <header>
+            <h1>FraudGuard <span class="highlight">AI</span></h1>
+            <p>Advanced Machine Learning for Secure Transactions</p>
+        </header>
+
+        <div class="glass-card">
+            <div class="tabs">
+                <button class="tab-btn active" onclick="switchTab('predict')">Predict Fraud</button>
+                <button class="tab-btn" onclick="switchTab('train')">Train Model</button>
+            </div>
+
+            <div id="predict-section" class="tab-content active">
+                <h3>Check Transaction File</h3>
+                <p class="subtext">Upload a CSV file to scan for fraudulent transactions using our trained Random Forest
+                    model.</p>
+
+                <form id="predict-form">
+                    <div class="file-drop-area" id="predict-drop">
+                        <span class="file-msg">Drag & Drop CSV here or Click to Upload</span>
+                        <input type="file" id="predict-file" class="file-input" accept=".csv" required>
+                    </div>
+                    <button type="submit" class="action-btn">Analyze File</button>
+                </form>
+                <div id="predict-loader" class="loader hidden"></div>
+            </div>
+
+            <div id="train-section" class="tab-content">
+                <h3>Retrain Model</h3>
+                <p class="subtext">Upload a labeled dataset to improve the detection accuracy.</p>
+
+                <form id="train-form">
+                    <div class="file-drop-area" id="train-drop">
+                        <span class="file-msg">Drag & Drop Training CSV here</span>
+                        <input type="file" id="train-file" class="file-input" accept=".csv" required>
+                    </div>
+                    <button type="submit" class="action-btn secondary">Train New Model</button>
+                </form>
+                <div id="train-loader" class="loader hidden"></div>
+            </div>
+
+            <div id="result-area" class="hidden">
+                <div class="divider"></div>
+                <h3>Analysis Results</h3>
+                <div class="stats-grid">
+                    <div class="stat-card legitimate">
+                        <h4>Legitimate</h4>
+                        <span id="res-legit">0</span>
+                    </div>
+                    <div class="stat-card fraud">
+                        <h4>Fraudulent</h4>
+                        <span id="res-fraud">0</span>
+                    </div>
+                    <div class="stat-card total">
+                        <h4>Total Scanned</h4>
+                        <span id="res-total">0</span>
+                    </div>
+                </div>
+                <div class="chart-container">
+                    <canvas id="resultChart"></canvas>
+                </div>
+            </div>
+
+            <div id="message-area" class="hidden"></div>
+
+        </div>
+    </div>
+
+    <script>
+        function switchTab(tab) {
+            document.querySelectorAll('.tab-content').forEach(el => el.classList.remove('active'));
+            document.querySelectorAll('.tab-btn').forEach(el => el.classList.remove('active'));
+
+            document.getElementById(tab + '-section').classList.add('active');
+            event.target.classList.add('active');
+
+            document.getElementById('result-area').classList.add('hidden');
+            document.getElementById('message-area').classList.add('hidden');
+        }
+
+        document.querySelectorAll('.file-input').forEach(input => {
+            input.addEventListener('change', (e) => {
+                const fileName = e.target.files[0]?.name || "Drag & Drop CSV here or Click to Upload";
+                e.target.parentElement.querySelector('.file-msg').textContent = fileName;
+            });
+        });
+
+        document.getElementById('predict-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            handleProcess('/predict', 'predict-file', 'predict-loader');
+        });
+
+        document.getElementById('train-form').addEventListener('submit', async (e) => {
+            e.preventDefault();
+            handleProcess('/train', 'train-file', 'train-loader');
+        });
+
+        async function handleProcess(endpoint, fileInputId, loaderId) {
+            const fileInput = document.getElementById(fileInputId);
+            if (!fileInput.files.length) return alert("Please select a file!");
+
+            const loader = document.getElementById(loaderId);
+            loader.classList.remove('hidden');
+
+            document.getElementById('result-area').classList.add('hidden');
+            document.getElementById('message-area').classList.add('hidden');
+
+            const formData = new FormData();
+            formData.append('file', fileInput.files[0]);
+
+            try {
+                const res = await fetch(endpoint, { method: 'POST', body: formData });
+                const data = await res.json();
+                loader.classList.add('hidden');
+
+                if (data.success) {
+                    showResults(data);
+                } else {
+                    showMessage(data.message, true);
+                }
+            } catch (err) {
+                loader.classList.add('hidden');
+                showMessage("An error occurred: " + err, true);
+            }
+        }
+
+        let chartInstance = null;
+
+        function showResults(data) {
+            const resultArea = document.getElementById('result-area');
+            resultArea.classList.remove('hidden');
+
+            let legit = data.legit;
+            let fraud = data.fraud;
+
+            if (data.accuracy) {
+                showMessage(`Training Complete! Accuracy: ${data.accuracy}`, false);
+                legit = data.total - data.fraud;
+            } else {
+                showMessage(`Prediction Complete`, false);
+            }
+
+            document.getElementById('res-total').innerText = data.total;
+            document.getElementById('res-fraud').innerText = fraud;
+            document.getElementById('res-legit').innerText = legit;
+
+            const ctx = document.getElementById('resultChart').getContext('2d');
+            if (chartInstance) chartInstance.destroy();
+
+            chartInstance = new Chart(ctx, {
+                type: 'doughnut',
+                data: {
+                    labels: ['Legitimate', 'Fraudulent'],
+                    datasets: [{
+                        data: [legit, fraud],
+                        backgroundColor: ['#10b981', '#ef4444'],
+                        borderWidth: 0
+                    }]
+                },
+                options: {
+                    responsive: true,
+                    maintainAspectRatio: false,
+                    plugins: {
+                        legend: { position: 'bottom', labels: { color: "#fff" } }
+                    }
+                }
+            });
+        }
+
+        function showMessage(msg, isError) {
+            const el = document.getElementById('message-area');
+            el.textContent = msg;
+            el.className = isError ? 'error-msg' : 'success-msg';
+            el.classList.remove('hidden');
+        }
+    </script>
+</body>
+
+</html>
